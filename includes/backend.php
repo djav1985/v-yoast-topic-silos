@@ -102,12 +102,12 @@ function vyts_render_silo_metabox( $post ) {
 		<?php while ( $silo_query->have_posts() ) : ?>
 			<?php $silo_query->the_post(); ?>
 			<li>
-				<a href="#"
+				<button type="button"
 				   class="vyts-copy-link"
 				   data-copy-url="<?php echo esc_url( get_permalink() ); ?>"
 				   title="<?php echo esc_attr( get_the_title() ); ?>">
 					<?php echo esc_html( get_the_title() ); ?>
-				</a>
+				</button>
 			</li>
 		<?php endwhile; ?>
 	</ul>
