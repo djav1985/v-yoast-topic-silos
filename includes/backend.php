@@ -128,6 +128,10 @@ function vyts_enqueue_metabox_assets( $hook_suffix ) {
 		return;
 	}
 
+	$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
+	if ( ! $screen || ! isset( $screen->post_type ) || ! in_array( $screen->post_type, array( 'post', 'page' ), true ) ) {
+		return;
+	}
 	$css = '
 		.vyts-silo-list { margin: 0; padding: 0; list-style: none; }
 		.vyts-silo-list li { margin: 4px 0; }
