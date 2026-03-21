@@ -20,6 +20,7 @@ If Yoast SEO is not active the plugin will deactivate itself and display an admi
 
 ### Backend (`includes/backend.php`)
 
+- **Topic Silo metabox** – Adds a *"Topic Silo – Related Links"* sidebar metabox to every post and page edit screen. It lists published posts and pages that share a category or tag with the current post. Clicking any link **copies its permalink to the clipboard** (instead of navigating away), making it easy to grab internal-link URLs without leaving the editor. A brief "Copied!" confirmation is shown after each click. Falls back gracefully to `execCommand('copy')` in older browsers.
 - **Auto-set social images** – On every `save_post`, automatically populates the Yoast OpenGraph and Twitter image meta fields with the post's featured image.
 - **Disable transition-words check** – Removes the transition-words readability assessment from the Yoast analysis panel.
 
