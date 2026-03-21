@@ -46,12 +46,16 @@ function vyts_add_aggregate_rating_to_local_business( $data ) {
 }
 
 // -----------------------------
-// Replace "Place" with "LocalBusiness" in schema graph.
+// Remove "Place" type from schema graph nodes.
 // -----------------------------
 add_filter( 'wpseo_schema_graph', 'vyts_replace_place_with_localbusiness', 10, 2 );
 
 /**
- * Replaces "Place" type with "LocalBusiness" in the schema graph.
+ * Removes the "Place" type from the @type array in schema graph nodes.
+ *
+ * This ensures the organisation is not typed as Place (which is incorrect for
+ * a LocalBusiness). The entry is removed rather than replaced; Yoast already
+ * outputs the correct LocalBusiness type independently.
  *
  * @param array $data    Schema graph data.
  * @param mixed $context Context object.

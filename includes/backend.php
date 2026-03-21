@@ -58,6 +58,12 @@ function vyts_render_silo_metabox( $post ) {
 		}
 	}
 
+	// No categories or tags — cannot build a silo query; nothing to show.
+	if ( empty( $term_ids ) ) {
+		echo '<p class="vyts-no-items">' . esc_html__( 'No related posts or pages found in the same silo.', 'v-yoast-topic-silos' ) . '</p>';
+		return;
+	}
+
 	// Build the query: posts and pages in the same silo, excluding the current one.
 	$query_args = array(
 		'post_type'           => array( 'post', 'page' ),
@@ -67,10 +73,7 @@ function vyts_render_silo_metabox( $post ) {
 		'ignore_sticky_posts' => true,
 		'orderby'             => 'title',
 		'order'               => 'ASC',
-	);
-
-	if ( ! empty( $term_ids ) ) {
-		$query_args['tax_query'] = array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query
+		'tax_query'           => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query
 			'relation' => 'OR',
 			array(
 				'taxonomy'         => 'category',
@@ -86,8 +89,8 @@ function vyts_render_silo_metabox( $post ) {
 				'operator'         => 'IN',
 				'include_children' => false,
 			),
-		);
-	}
+		),
+	);
 
 	$silo_query = new WP_Query( $query_args );
 
@@ -135,66 +138,82 @@ function vyts_enqueue_metabox_assets( $hook_suffix ) {
 	$css = '
 		.vyts-silo-list { margin: 0; padding: 0; list-style: none; }
 		.vyts-silo-list li { margin: 4px 0; }
-		.vyts-copy-link { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #2271b1; text-decoration: none; }
+		.vyts-copy-link { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #2271b1; background: none; border: none; padding: 0; margin: 0; font: inherit; cursor: pointer; text-align: left; text-decoration: none; }
 		.vyts-copy-link:hover { text-decoration: underline; }
 		.vyts-copied-notice { display: inline-block; margin-top: 6px; padding: 2px 8px; background: #00a32a; color: #fff; border-radius: 3px; font-size: 12px; }
 		.vyts-instructions { color: #646970; font-style: italic; margin-bottom: 6px; }
 	';
-	wp_add_inline_style( 'wp-admin', $css );
+
+	// Register a plugin-specific handle so wp_add_inline_style is guaranteed to print.
+	wp_register_style( 'vyts-metabox', false, array(), false ); // phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion
+	wp_enqueue_style( 'vyts-metabox' );
+	wp_add_inline_style( 'vyts-metabox', $css );
 
 	$js = '
-		document.addEventListener( "DOMContentLoaded", function () {
-			var metabox = document.getElementById( "vyts_silo_metabox" );
-			if ( ! metabox ) { return; }
+		( function () {
+			function init() {
+				var metabox = document.getElementById( "vyts_silo_metabox" );
+				if ( ! metabox ) { return; }
 
-			var notice = metabox.querySelector( ".vyts-copied-notice" );
+				var notice = metabox.querySelector( ".vyts-copied-notice" );
 
-			metabox.addEventListener( "click", function ( e ) {
-				var link = e.target.closest( ".vyts-copy-link" );
-				if ( ! link ) { return; }
+				metabox.addEventListener( "click", function ( e ) {
+					var link = e.target.closest( ".vyts-copy-link" );
+					if ( ! link ) { return; }
 
-				e.preventDefault();
+					e.preventDefault();
 
-				var url = link.getAttribute( "data-copy-url" );
-				if ( ! url ) { return; }
+					var url = link.getAttribute( "data-copy-url" );
+					if ( ! url ) { return; }
 
-				if ( navigator.clipboard && navigator.clipboard.writeText ) {
-					navigator.clipboard.writeText( url ).then( function () {
-						showNotice();
-					} ).catch( function () {
+					if ( navigator.clipboard && navigator.clipboard.writeText ) {
+						navigator.clipboard.writeText( url ).then( function () {
+							showNotice();
+						} ).catch( function () {
+							fallbackCopy( url );
+						} );
+					} else {
 						fallbackCopy( url );
-					} );
-				} else {
-					fallbackCopy( url );
-				}
-			} );
+					}
+				} );
 
-			function showNotice() {
-				if ( ! notice ) { return; }
-				notice.style.display = "inline-block";
-				setTimeout( function () {
-					notice.style.display = "none";
-				}, 1500 );
+				function showNotice() {
+					if ( ! notice ) { return; }
+					notice.style.display = "inline-block";
+					setTimeout( function () {
+						notice.style.display = "none";
+					}, 1500 );
+				}
+
+				function fallbackCopy( url ) {
+					var el = document.createElement( "textarea" );
+					el.value = url;
+					el.setAttribute( "readonly", "" );
+					el.style.cssText = "position:absolute;left:-9999px;";
+					document.body.appendChild( el );
+					el.select();
+					try {
+						document.execCommand( "copy" );
+						showNotice();
+					} catch ( err ) {
+						/* silent fail */
+					}
+					document.body.removeChild( el );
+				}
 			}
 
-			function fallbackCopy( url ) {
-				var el = document.createElement( "textarea" );
-				el.value = url;
-				el.setAttribute( "readonly", "" );
-				el.style.cssText = "position:absolute;left:-9999px;";
-				document.body.appendChild( el );
-				el.select();
-				try {
-					document.execCommand( "copy" );
-					showNotice();
-				} catch ( err ) {
-					/* silent fail */
-				}
-				document.body.removeChild( el );
+			if ( document.readyState === "loading" ) {
+				document.addEventListener( "DOMContentLoaded", init );
+			} else {
+				init();
 			}
-		} );
+		}() );
 	';
-	wp_add_inline_script( 'wp-api', $js );
+
+	// Register a plugin-specific handle in the footer so the inline script is always printed.
+	wp_register_script( 'vyts-metabox', false, array(), false, true ); // phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion
+	wp_enqueue_script( 'vyts-metabox' );
+	wp_add_inline_script( 'vyts-metabox', $js );
 }
 
 // -----------------------------
