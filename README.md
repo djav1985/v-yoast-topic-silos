@@ -37,6 +37,7 @@ If Yoast SEO is not active the plugin will deactivate itself and display an admi
 ```
 v-yoast-topic-silos/
 ├── v-yoast-topic-silos.php   ← main plugin file (activation, dependency check)
+├── uninstall.php              ← removes all plugin options on deletion
 ├── includes/
 │   ├── backend.php            ← backend hooks (save_post, readability filter)
 │   └── frontend.php           ← frontend hooks (schema, Dublin Core, output buffer)

@@ -31,10 +31,12 @@ function vyts_add_aggregate_rating_to_local_business( $data ) {
 		preg_match( '#^/services/web-design(/|$)#', $request_uri ) ||
 		is_page( 'web-design-portfolio' )
 	) {
+		$settings = wp_parse_args( (array) get_option( 'vyts_settings', array() ), vyts_default_settings() );
+
 		$data['aggregateRating'] = array(
 			'@type'       => 'AggregateRating',
-			'ratingValue' => VYTS_RATING_VALUE,
-			'reviewCount' => VYTS_RATING_COUNT,
+			'ratingValue' => $settings['rating_value'],
+			'reviewCount' => $settings['rating_count'],
 			'bestRating'  => '5',
 			'worstRating' => '1',
 		);
@@ -101,6 +103,8 @@ add_filter( 'wpseo_schema_graph', 'vyts_force_org_as_author', 20 );
  * @return array Modified schema graph data.
  */
 function vyts_force_org_as_author( $graph ) {
+	$settings = wp_parse_args( (array) get_option( 'vyts_settings', array() ), vyts_default_settings() );
+
 	foreach ( $graph as $key => &$node ) {
 		// Remove standalone @type: Person blocks.
 		if ( isset( $node['@type'] ) && 'Person' === $node['@type'] ) {
@@ -116,26 +120,20 @@ function vyts_force_org_as_author( $graph ) {
 		) {
 			$node['author'] = array(
 				'@type'       => 'Organization',
-				'@id'         => VYTS_ORG_SCHEMA_ID,
-				'name'        => 'Vontainment',
-				'url'         => 'https://vontainment.com/',
-				'description' => 'Vontainment is a digital design and IT firm in Port Charlotte, Florida, offering web design, SEO, social media, and tech services tailored to small businesses.',
+				'@id'         => $settings['org_schema_id'],
+				'name'        => $settings['org_name'],
+				'url'         => $settings['org_url'],
+				'description' => $settings['org_description'],
 				'logo'        => array(
 					'@type'      => 'ImageObject',
-					'@id'        => 'https://vontainment.com/#organizationlogo',
-					'url'        => 'https://vontainment.com/wp-content/uploads/2023/01/vontainment-logo.png',
-					'contentUrl' => 'https://vontainment.com/wp-content/uploads/2023/01/vontainment-logo.png',
-					'width'      => 600,
-					'height'     => 120,
-					'caption'    => 'Vontainment',
+					'@id'        => $settings['org_logo_id'],
+					'url'        => $settings['org_logo_url'],
+					'contentUrl' => $settings['org_logo_url'],
+					'width'      => (int) $settings['org_logo_width'],
+					'height'     => (int) $settings['org_logo_height'],
+					'caption'    => $settings['org_logo_caption'],
 				),
-				'sameAs'      => array(
-					'https://www.facebook.com/vontainmentswfl/',
-					'https://x.com/VontainmentSWFL',
-					'https://www.instagram.com/vontainmentswfl/',
-					'https://www.youtube.com/c/VontainmentPuntaGorda',
-					'https://github.com/djav1985',
-				),
+				'sameAs'      => (array) $settings['org_same_as'],
 			);
 		}
 	}
