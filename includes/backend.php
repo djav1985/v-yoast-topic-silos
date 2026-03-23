@@ -145,7 +145,7 @@ function vyts_enqueue_metabox_assets( $hook_suffix ) {
 	';
 
 	// Register a plugin-specific handle so wp_add_inline_style is guaranteed to print.
-	wp_register_style( 'vyts-metabox', false, array(), false ); // phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion
+	wp_register_style( 'vyts-metabox', false, array(), VYTS_VERSION );
 	wp_enqueue_style( 'vyts-metabox' );
 	wp_add_inline_style( 'vyts-metabox', $css );
 
@@ -211,7 +211,7 @@ function vyts_enqueue_metabox_assets( $hook_suffix ) {
 	';
 
 	// Register a plugin-specific handle in the footer so the inline script is always printed.
-	wp_register_script( 'vyts-metabox', false, array(), false, true ); // phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion
+	wp_register_script( 'vyts-metabox', false, array(), VYTS_VERSION, true );
 	wp_enqueue_script( 'vyts-metabox' );
 	wp_add_inline_script( 'vyts-metabox', $js );
 }

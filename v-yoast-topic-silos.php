@@ -72,12 +72,6 @@ function vyts_check_yoast_dependency() {
 
 		// Deactivate this plugin gracefully.
 		deactivate_plugins( plugin_basename( VYTS_PLUGIN_FILE ) );
-
-		// Prevent the "Plugin activated" notice from showing by redirecting without the activate param.
-		if ( isset( $_GET['activate'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-			wp_safe_redirect( remove_query_arg( 'activate' ) );
-			exit;
-		}
 	}
 }
 add_action( 'admin_init', 'vyts_check_yoast_dependency' );
@@ -107,6 +101,20 @@ function vyts_missing_yoast_notice() {
 
 /**
  * Load plugin functionality only when Yoast SEO is available.
+ *
+ * frontend.php registers schema filters and output-buffering hooks that are
+ * only meaningful on public-facing pages. Loading it during admin requests
+ * (including the block editor, which is served via wp-admin/post.php) would
+ * allow Yoast's schema hooks to fire during the SEO analysis panel. Those
+ * callbacks call conditional tags such as is_front_page() / is_page() that
+ * are not meaningful in admin context and can produce PHP notices; with
+ * WP_DEBUG_DISPLAY enabled those notices are echoed into the page HTML,
+ * corrupting the document and triggering the "block editor requires
+ * JavaScript" fallback message.
+ *
+ * REST API requests (is_admin() === false) are safe: template_redirect and
+ * wp_head do not fire in that context, so the output-buffering code is never
+ * invoked and no HTML is corrupted.
  */
 function vyts_load() {
 	if ( ! defined( 'WPSEO_VERSION' ) ) {
@@ -114,6 +122,11 @@ function vyts_load() {
 	}
 
 	require_once VYTS_PLUGIN_DIR . 'includes/backend.php';
-	require_once VYTS_PLUGIN_DIR . 'includes/frontend.php';
+
+	// REST API requests have is_admin() === false and are safe: template_redirect
+	// and wp_head never fire there, so no HTML output corruption can occur.
+	if ( ! is_admin() ) {
+		require_once VYTS_PLUGIN_DIR . 'includes/frontend.php';
+	}
 }
 add_action( 'plugins_loaded', 'vyts_load' );
