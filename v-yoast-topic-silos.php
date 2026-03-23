@@ -72,12 +72,6 @@ function vyts_check_yoast_dependency() {
 
 		// Deactivate this plugin gracefully.
 		deactivate_plugins( plugin_basename( VYTS_PLUGIN_FILE ) );
-
-		// Prevent the "Plugin activated" notice from showing by redirecting without the activate param.
-		if ( isset( $_GET['activate'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-			wp_safe_redirect( remove_query_arg( 'activate' ) );
-			exit;
-		}
 	}
 }
 add_action( 'admin_init', 'vyts_check_yoast_dependency' );
