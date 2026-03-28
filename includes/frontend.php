@@ -179,6 +179,6 @@ add_filter( 'wpseo_meta_author', 'vyts_set_author_meta_to_site_name' );
  * @param string $author_name The article author's display name.
  * @return string The site name used as the author meta tag content.
  */
-function vyts_set_author_meta_to_site_name( $author_name ) {
+function vyts_set_author_meta_to_site_name( $_author_name ) {
 	return get_bloginfo( 'name' );
 }
