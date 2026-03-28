@@ -64,12 +64,12 @@ function vyts_render_silo_metabox( $post ) {
 		return;
 	}
 
-	// Build the query: posts and pages in the same silo, excluding the current one.
+	// Build the query: posts and pages in the same silo, excluding the post/page being edited.
 	$query_args = array(
 		'post_type'           => array( 'post', 'page' ),
 		'post_status'         => 'publish',
 		'posts_per_page'      => 20,
-		'post__not_in'        => array( $post->ID ),
+		'post__not_in'        => array( $post->ID ), // Never show the post currently being edited.
 		'ignore_sticky_posts' => true,
 		'orderby'             => 'title',
 		'order'               => 'ASC',
