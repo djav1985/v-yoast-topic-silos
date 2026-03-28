@@ -166,27 +166,19 @@ function vyts_name_breadcrumb_list( $graph ) {
 }
 
 // -----------------------------
-// Modify author meta tag in output buffer.
+// Override Yoast author meta tag value with site name.
 // -----------------------------
-add_action( 'template_redirect', 'vyts_buffer_author_meta_tag' );
+add_filter( 'wpseo_meta_author', 'vyts_set_author_meta_to_site_name' );
 
 /**
- * Starts output buffering to replace the Yoast author meta tag with the site name.
- */
-function vyts_buffer_author_meta_tag() {
-	ob_start( 'vyts_replace_author_meta_tag' );
-}
-
-/**
- * Callback for ob_start: replaces the Yoast author meta tag value with the site name.
+ * Replaces the Yoast author meta tag value with the site name.
  *
- * @param string $buffer The full page output buffer.
- * @return string Modified buffer.
+ * Hooks into Yoast's wpseo_meta_author filter so the <meta name="author">
+ * tag reflects the organisation rather than the individual post author.
+ *
+ * @param string $author_name The article author's display name.
+ * @return string The site name used as the author meta tag content.
  */
-function vyts_replace_author_meta_tag( $buffer ) {
-	return preg_replace(
-		'/<meta name="author" content="[^"]*" class="yoast-seo-meta-tag"\s*\/?>/',
-		'<meta name="author" content="' . esc_attr( get_bloginfo( 'name' ) ) . '" class="yoast-seo-meta-tag" />',
-		$buffer
-	);
+function vyts_set_author_meta_to_site_name( $author_name ) {
+	return get_bloginfo( 'name' );
 }
