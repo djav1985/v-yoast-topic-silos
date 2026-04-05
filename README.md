@@ -26,7 +26,6 @@ If Yoast SEO is not active the plugin will deactivate itself and display an admi
 
 ### Frontend (`includes/frontend.php`)
 
-- **Aggregate rating in schema** – Injects an `AggregateRating` block into the `Organization` schema on the front page, the `/services/web-design/` path, and the `web-design-portfolio` page.
 - **Replace Place with LocalBusiness** – Strips `Place` from any `@type` array in the schema graph so the organisation is correctly typed as `LocalBusiness`.
 - **Dublin Core metadata** – Outputs `DC.*` `<meta>` tags in `wp_head` using Yoast's stored focus-keyword and meta-description.
 - **Force Organisation as author** – Replaces any `Person` author node in `Article`/`BlogPosting` schema with the Vontainment `Organization` entity and removes standalone `Person` nodes.

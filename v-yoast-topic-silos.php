@@ -31,8 +31,6 @@ define( 'VYTS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
  */
 function vyts_default_settings() {
 	return array(
-		'rating_value'       => '4.8',
-		'rating_count'       => '32',
 		'org_schema_id'      => 'https://vontainment.com/#/schema/organization/932a68de94362ace3f0c11b0554c73e4',
 		'org_name'           => 'Vontainment',
 		'org_url'            => 'https://vontainment.com/',
