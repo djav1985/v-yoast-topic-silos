@@ -246,6 +246,85 @@ function vyts_set_yoast_social_images( $post_id ) {
 }
 
 // -----------------------------
+// Add anchor IDs to headers in post content on save.
+// -----------------------------
+add_action( 'save_post', 'vyts_add_anchor_ids_to_headers', 10, 3 );
+
+/**
+ * Adds id attributes to h1–h6 tags in post/page content on save.
+ *
+ * Each heading that does not already carry an id attribute receives one
+ * generated from its inner text via sanitize_title(). The post content is
+ * updated only when at least one heading was changed.
+ *
+ * @param int     $post_id Post ID.
+ * @param WP_Post $post    Post object.
+ * @param bool    $update  Whether this is an existing post being updated.
+ */
+function vyts_add_anchor_ids_to_headers( $post_id, $post, $update ) {
+	if ( wp_is_post_autosave( $post_id ) || wp_is_post_revision( $post_id ) ) {
+		return;
+	}
+
+	if ( 'post' !== $post->post_type && 'page' !== $post->post_type ) {
+		return;
+	}
+
+	// Unhook to prevent recursion when wp_update_post fires save_post again.
+	remove_action( 'save_post', 'vyts_add_anchor_ids_to_headers', 10 );
+
+	$content = $post->post_content;
+
+	$used_ids    = array();
+	$new_content = preg_replace_callback(
+		'/<(h[1-6])([^>]*)>(.*?)<\/\1>/is',
+		function ( $matches ) use ( &$used_ids ) {
+			$tag   = $matches[1];
+			$attrs = $matches[2];
+			$inner = $matches[3];
+
+			// Leave headings that already have an id attribute untouched.
+			if ( preg_match( '/\bid\s*=/i', $attrs ) ) {
+				return $matches[0];
+			}
+
+			$base_id = 'h-' . sanitize_title( wp_strip_all_tags( $inner ) );
+
+			if ( '' === $base_id ) {
+				return $matches[0];
+			}
+
+			// Ensure uniqueness within the document by appending a counter.
+			$id      = $base_id;
+			$counter = 1;
+			while ( in_array( $id, $used_ids, true ) ) {
+				$id = $base_id . '-' . $counter;
+				++$counter;
+			}
+			$used_ids[] = $id;
+
+			$trimmed_attrs = trim( $attrs );
+			$attr_sep      = '' !== $trimmed_attrs ? ' ' . $trimmed_attrs : '';
+
+			return '<' . $tag . $attr_sep . ' id="' . esc_attr( $id ) . '">' . $inner . '</' . $tag . '>';
+		},
+		$content
+	);
+
+	if ( $new_content !== $content ) {
+		wp_update_post(
+			array(
+				'ID'           => $post_id,
+				'post_content' => $new_content,
+			)
+		);
+	}
+
+	// Restore the hook after the update so subsequent saves are also processed.
+	add_action( 'save_post', 'vyts_add_anchor_ids_to_headers', 10, 3 );
+}
+
+// -----------------------------
 // Disable Yoast transition words readability check.
 // -----------------------------
 add_filter( 'wpseo_readability_analysis_active', 'vyts_disable_transition_words_check', 10, 2 );
