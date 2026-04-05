@@ -13,39 +13,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // -----------------------------
-// Add aggregate rating to local business schema.
-// -----------------------------
-add_filter( 'wpseo_schema_organization', 'vyts_add_aggregate_rating_to_local_business' );
-
-/**
- * Adds aggregate rating to local business schema for specific pages.
- *
- * @param array $data Schema data.
- * @return array Modified schema data.
- */
-function vyts_add_aggregate_rating_to_local_business( $data ) {
-	$request_uri = isset( $_SERVER['REQUEST_URI'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REQUEST_URI'] ) ) : '';
-
-	if (
-		is_front_page() ||
-		preg_match( '#^/services/web-design(/|$)#', $request_uri ) ||
-		is_page( 'web-design-portfolio' )
-	) {
-		$settings = wp_parse_args( (array) get_option( 'vyts_settings', array() ), vyts_default_settings() );
-
-		$data['aggregateRating'] = array(
-			'@type'       => 'AggregateRating',
-			'ratingValue' => $settings['rating_value'],
-			'reviewCount' => $settings['rating_count'],
-			'bestRating'  => '5',
-			'worstRating' => '1',
-		);
-	}
-
-	return $data;
-}
-
-// -----------------------------
 // Remove "Place" type from schema graph nodes.
 // -----------------------------
 add_filter( 'wpseo_schema_graph', 'vyts_replace_place_with_localbusiness', 10, 2 );
