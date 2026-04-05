@@ -288,7 +288,7 @@ function vyts_add_anchor_ids_to_headers( $post_id, $post, $update ) {
 				return $matches[0];
 			}
 
-			$base_id = sanitize_title( wp_strip_all_tags( $inner ) );
+			$base_id = 'h-' . sanitize_title( wp_strip_all_tags( $inner ) );
 
 			if ( '' === $base_id ) {
 				return $matches[0];
