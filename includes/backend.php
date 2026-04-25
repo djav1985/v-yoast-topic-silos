@@ -16,6 +16,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 // Topic-silo metabox: register, render, and enqueue assets.
 // -----------------------------
 add_action( 'add_meta_boxes', 'vyts_register_silo_metabox' );
+add_action( 'add_meta_boxes', 'vyts_register_page_category_metabox' );
+add_action( 'save_post_page', 'vyts_save_page_category', 10, 2 );
 add_action( 'admin_enqueue_scripts', 'vyts_enqueue_metabox_assets' );
 
 /**
@@ -35,6 +37,113 @@ function vyts_register_silo_metabox() {
 }
 
 /**
+ * Registers the Page Category metabox on the page edit screen.
+ *
+ * Pages do not support the built-in category taxonomy, so this metabox
+ * provides a way to associate a page with one or more categories for the
+ * purpose of topic-cluster / silo grouping.
+ */
+function vyts_register_page_category_metabox() {
+	add_meta_box(
+		'vyts_page_category_metabox',
+		__( 'Topic Cluster – Page Category', 'v-yoast-topic-silos' ),
+		'vyts_render_page_category_metabox',
+		'page',
+		'side',
+		'default'
+	);
+}
+
+/**
+ * Renders the Page Category metabox.
+ *
+ * Displays a checkbox list of all WordPress categories so editors can
+ * associate a page with the appropriate topic cluster / silo.
+ *
+ * @param WP_Post $post Current post object.
+ */
+function vyts_render_page_category_metabox( $post ) {
+	wp_nonce_field( 'vyts_save_page_category', 'vyts_page_category_nonce' );
+
+	$saved_ids  = get_post_meta( $post->ID, '_vyts_page_category_ids', false );
+	$saved_ids  = is_array( $saved_ids ) ? array_filter( array_map( 'intval', $saved_ids ), function ( $id ) { return $id > 0; } ) : array();
+
+	$categories = get_categories(
+		array(
+			'hide_empty' => false,
+			'orderby'    => 'name',
+			'order'      => 'ASC',
+		)
+	);
+
+	if ( empty( $categories ) ) {
+		echo '<p class="vyts-no-items">' . esc_html__( 'No categories found. Create categories in Posts → Categories first.', 'v-yoast-topic-silos' ) . '</p>';
+		return;
+	}
+	?>
+	<p class="vyts-instructions"><?php esc_html_e( 'Select the categories this page belongs to for topic cluster grouping.', 'v-yoast-topic-silos' ); ?></p>
+	<ul class="vyts-category-list">
+		<?php foreach ( $categories as $category ) : ?>
+			<li>
+				<label>
+					<input type="checkbox"
+					       name="vyts_page_category_ids[]"
+					       value="<?php echo esc_attr( $category->term_id ); ?>"
+					       <?php checked( in_array( (int) $category->term_id, $saved_ids, true ) ); ?>>
+					<?php echo esc_html( $category->name ); ?>
+				</label>
+			</li>
+		<?php endforeach; ?>
+	</ul>
+	<?php
+}
+
+/**
+ * Saves the Page Category metabox data on page save.
+ *
+ * @param int     $post_id Post ID.
+ * @param WP_Post $post    Post object.
+ */
+function vyts_save_page_category( $post_id, $post ) {
+	// Bail on autosave and revisions.
+	if ( wp_is_post_autosave( $post_id ) || wp_is_post_revision( $post_id ) ) {
+		return;
+	}
+
+	// Verify nonce.
+	if (
+		! isset( $_POST['vyts_page_category_nonce'] ) ||
+		! wp_verify_nonce( sanitize_key( $_POST['vyts_page_category_nonce'] ), 'vyts_save_page_category' )
+	) {
+		return;
+	}
+
+	// Check user capability.
+	if ( ! current_user_can( 'edit_post', $post_id ) ) {
+		return;
+	}
+
+	// Sanitize and save.
+	if ( isset( $_POST['vyts_page_category_ids'] ) && is_array( $_POST['vyts_page_category_ids'] ) ) {
+		$category_ids = array_filter(
+			array_map( 'absint', wp_unslash( $_POST['vyts_page_category_ids'] ) ),
+			function ( $id ) {
+				return $id > 0;
+			}
+		);
+
+		// Store each category ID as a separate meta row so meta_query IN comparisons work.
+		delete_post_meta( $post_id, '_vyts_page_category_ids' );
+		foreach ( $category_ids as $cat_id ) {
+			add_post_meta( $post_id, '_vyts_page_category_ids', $cat_id );
+		}
+	} else {
+		// No checkboxes submitted — clear the meta.
+		delete_post_meta( $post_id, '_vyts_page_category_ids' );
+	}
+}
+
+/**
  * Renders the Topic Cluster metabox content.
  *
  * Displays two sections:
@@ -45,6 +154,10 @@ function vyts_register_silo_metabox() {
  *
  * Each link copies the permalink to the clipboard instead of navigating away.
  *
+ * For pages, the category affiliation is taken from the custom
+ * _vyts_page_category_ids meta field (set via the Page Category metabox).
+ * For posts, the standard WordPress category taxonomy is used.
+ *
  * @param WP_Post $post Current post object.
  */
 function vyts_render_silo_metabox( $post ) {
@@ -53,22 +166,35 @@ function vyts_render_silo_metabox( $post ) {
 	$category_ids = array();
 	$tag_ids      = array();
 
-	$categories = get_the_category( $post->ID );
-	foreach ( $categories as $cat ) {
-		$category_ids[] = (int) $cat->term_id;
-	}
+	if ( 'page' === $post->post_type ) {
+		// Pages don't have built-in category support; use the custom meta field.
+		// Values are stored as individual meta rows, so pass false to get all rows.
+		$saved = get_post_meta( $post->ID, '_vyts_page_category_ids', false );
+		if ( is_array( $saved ) ) {
+			$category_ids = array_filter( array_map( 'intval', $saved ), function ( $id ) { return $id > 0; } );
+		}
+	} else {
+		// Posts: use the standard WordPress category taxonomy.
+		$categories = get_the_category( $post->ID );
+		foreach ( $categories as $cat ) {
+			$category_ids[] = (int) $cat->term_id;
+		}
 
-	$tags = get_the_tags( $post->ID );
-	if ( is_array( $tags ) ) {
-		foreach ( $tags as $tag ) {
-			$tag_ids[] = (int) $tag->term_id;
+		$tags = get_the_tags( $post->ID );
+		if ( is_array( $tags ) ) {
+			foreach ( $tags as $tag ) {
+				$tag_ids[] = (int) $tag->term_id;
+			}
 		}
 	}
 
 	// --- Build related-posts query (same category or tag) ---
+	// Posts are in the WP category/tag taxonomy; pages are not, so they must be
+	// queried separately via the _vyts_page_category_ids meta field.
 	$related_post_ids = array();
 
 	if ( ! empty( $category_ids ) || ! empty( $tag_ids ) ) {
+		// Sub-query A: regular posts matched by taxonomy.
 		$tax_query = array( 'relation' => 'OR' ); // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query
 
 		if ( ! empty( $category_ids ) ) {
@@ -93,7 +219,7 @@ function vyts_render_silo_metabox( $post ) {
 
 		$related_post_ids = get_posts( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query
 			array(
-				'post_type'           => array( 'post', 'page' ),
+				'post_type'           => 'post',
 				'post_status'         => 'publish',
 				'posts_per_page'      => 50,
 				'post__not_in'        => array( $post->ID ),
@@ -104,6 +230,34 @@ function vyts_render_silo_metabox( $post ) {
 				'tax_query'           => $tax_query, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query
 			)
 		);
+	}
+
+	// Sub-query B: pages matched by _vyts_page_category_ids meta.
+	// Pages are not part of the WP category taxonomy, so tax_query cannot find
+	// them; instead compare against the custom meta rows stored per category ID.
+	if ( ! empty( $category_ids ) ) {
+		$related_page_ids = get_posts( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+			array(
+				'post_type'           => 'page',
+				'post_status'         => 'publish',
+				'posts_per_page'      => 50,
+				'post__not_in'        => array( $post->ID ),
+				'ignore_sticky_posts' => true,
+				'orderby'             => 'title',
+				'order'               => 'ASC',
+				'fields'              => 'ids',
+				'meta_query'          => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+					array(
+						'key'     => '_vyts_page_category_ids',
+						'value'   => $category_ids,
+						'compare' => 'IN',
+						'type'    => 'NUMERIC',
+					),
+				),
+			)
+		);
+
+		$related_post_ids = array_unique( array_merge( $related_post_ids, $related_page_ids ) );
 	}
 
 	// --- Build other-posts query (all published posts/pages outside this silo) ---
@@ -196,6 +350,9 @@ function vyts_enqueue_metabox_assets( $hook_suffix ) {
 		.vyts-copied-notice { display: inline-block; margin-top: 6px; padding: 2px 8px; background: #00a32a; color: #fff; border-radius: 3px; font-size: 12px; }
 		.vyts-instructions { color: #646970; font-style: italic; margin-bottom: 6px; }
 		.vyts-section-heading { font-weight: 600; margin: 10px 0 4px; border-bottom: 1px solid #dcdcde; padding-bottom: 4px; }
+		.vyts-category-list { margin: 0; padding: 0; list-style: none; }
+		.vyts-category-list li { margin: 4px 0; }
+		.vyts-category-list label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 	';
 
 	// Register a plugin-specific handle so wp_add_inline_style is guaranteed to print.
