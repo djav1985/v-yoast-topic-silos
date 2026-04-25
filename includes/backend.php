@@ -19,13 +19,13 @@ add_action( 'add_meta_boxes', 'vyts_register_silo_metabox' );
 add_action( 'admin_enqueue_scripts', 'vyts_enqueue_metabox_assets' );
 
 /**
- * Registers the Topic Silo metabox on post and page edit screens.
+ * Registers the Topic Cluster metabox on post and page edit screens.
  */
 function vyts_register_silo_metabox() {
 	foreach ( array( 'post', 'page' ) as $post_type ) {
 		add_meta_box(
 			'vyts_silo_metabox',
-			__( 'Topic Silo – Related Links', 'v-yoast-topic-silos' ),
+			__( 'Topic Cluster – Related Links', 'v-yoast-topic-silos' ),
 			'vyts_render_silo_metabox',
 			$post_type,
 			'side',
@@ -35,85 +35,138 @@ function vyts_register_silo_metabox() {
 }
 
 /**
- * Renders the Topic Silo metabox content.
+ * Renders the Topic Cluster metabox content.
  *
- * Lists posts and pages that share a category or tag with the current post.
+ * Displays two sections:
+ *   - Related Links: posts and pages that share a category or tag with the
+ *     current post (i.e. within the same topic cluster / silo).
+ *   - Other Links: all other published posts and pages that are not in the
+ *     current silo, useful for cross-silo internal linking.
+ *
  * Each link copies the permalink to the clipboard instead of navigating away.
  *
  * @param WP_Post $post Current post object.
  */
 function vyts_render_silo_metabox( $post ) {
-	// Collect term IDs from both categories and tags.
-	$term_ids = array();
+	// Collect category IDs and tag IDs separately so each taxonomy clause only
+	// receives term IDs that actually belong to that taxonomy.
+	$category_ids = array();
+	$tag_ids      = array();
 
 	$categories = get_the_category( $post->ID );
 	foreach ( $categories as $cat ) {
-		$term_ids[] = (int) $cat->term_id;
+		$category_ids[] = (int) $cat->term_id;
 	}
 
 	$tags = get_the_tags( $post->ID );
 	if ( is_array( $tags ) ) {
 		foreach ( $tags as $tag ) {
-			$term_ids[] = (int) $tag->term_id;
+			$tag_ids[] = (int) $tag->term_id;
 		}
 	}
 
-	// No categories or tags — cannot build a silo query; nothing to show.
-	if ( empty( $term_ids ) ) {
-		echo '<p class="vyts-no-items">' . esc_html__( 'No related posts or pages found in the same silo.', 'v-yoast-topic-silos' ) . '</p>';
-		return;
-	}
+	// --- Build related-posts query (same category or tag) ---
+	$related_post_ids = array();
 
-	// Build the query: posts and pages in the same silo, excluding the post/page being edited.
-	$query_args = array(
-		'post_type'           => array( 'post', 'page' ),
-		'post_status'         => 'publish',
-		'posts_per_page'      => 20,
-		'post__not_in'        => array( $post->ID ), // Never show the post currently being edited.
-		'ignore_sticky_posts' => true,
-		'orderby'             => 'title',
-		'order'               => 'ASC',
-		'tax_query'           => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query
-			'relation' => 'OR',
-			array(
+	if ( ! empty( $category_ids ) || ! empty( $tag_ids ) ) {
+		$tax_query = array( 'relation' => 'OR' ); // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query
+
+		if ( ! empty( $category_ids ) ) {
+			$tax_query[] = array(
 				'taxonomy'         => 'category',
 				'field'            => 'term_id',
-				'terms'            => $term_ids,
+				'terms'            => $category_ids,
 				'operator'         => 'IN',
 				'include_children' => false,
-			),
-			array(
+			);
+		}
+
+		if ( ! empty( $tag_ids ) ) {
+			$tax_query[] = array(
 				'taxonomy'         => 'post_tag',
 				'field'            => 'term_id',
-				'terms'            => $term_ids,
+				'terms'            => $tag_ids,
 				'operator'         => 'IN',
 				'include_children' => false,
-			),
-		),
+			);
+		}
+
+		$related_post_ids = get_posts( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query
+			array(
+				'post_type'           => array( 'post', 'page' ),
+				'post_status'         => 'publish',
+				'posts_per_page'      => 50,
+				'post__not_in'        => array( $post->ID ),
+				'ignore_sticky_posts' => true,
+				'orderby'             => 'title',
+				'order'               => 'ASC',
+				'fields'              => 'ids',
+				'tax_query'           => $tax_query, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query
+			)
+		);
+	}
+
+	// --- Build other-posts query (all published posts/pages outside this silo) ---
+	$excluded_ids = array_merge( array( $post->ID ), $related_post_ids );
+
+	$other_query = new WP_Query(
+		array(
+			'post_type'           => array( 'post', 'page' ),
+			'post_status'         => 'publish',
+			'posts_per_page'      => 50,
+			'post__not_in'        => $excluded_ids,
+			'ignore_sticky_posts' => true,
+			'orderby'             => 'title',
+			'order'               => 'ASC',
+		)
 	);
 
-	$silo_query = new WP_Query( $query_args );
+	$has_related = ! empty( $related_post_ids );
+	$has_other   = $other_query->have_posts();
 
-	if ( ! $silo_query->have_posts() ) {
-		echo '<p class="vyts-no-items">' . esc_html__( 'No related posts or pages found in the same silo.', 'v-yoast-topic-silos' ) . '</p>';
+	if ( ! $has_related && ! $has_other ) {
+		echo '<p class="vyts-no-items">' . esc_html__( 'No related posts or pages found.', 'v-yoast-topic-silos' ) . '</p>';
 		wp_reset_postdata();
 		return;
 	}
 	?>
 	<p class="vyts-instructions"><?php esc_html_e( 'Click a link to copy its URL to your clipboard.', 'v-yoast-topic-silos' ); ?></p>
-	<ul class="vyts-silo-list">
-		<?php while ( $silo_query->have_posts() ) : ?>
-			<?php $silo_query->the_post(); ?>
-			<li>
-				<button type="button"
-				   class="vyts-copy-link"
-				   data-copy-url="<?php echo esc_url( get_permalink() ); ?>"
-				   title="<?php echo esc_attr( get_the_title() ); ?>">
-					<?php echo esc_html( get_the_title() ); ?>
-				</button>
-			</li>
-		<?php endwhile; ?>
-	</ul>
+
+	<?php if ( $has_related ) : ?>
+		<p class="vyts-section-heading"><?php esc_html_e( 'Related Links', 'v-yoast-topic-silos' ); ?></p>
+		<ul class="vyts-silo-list">
+			<?php foreach ( $related_post_ids as $related_id ) : ?>
+				<li>
+					<button type="button"
+					   class="vyts-copy-link"
+					   data-copy-url="<?php echo esc_url( get_permalink( $related_id ) ); ?>"
+					   title="<?php echo esc_attr( get_the_title( $related_id ) ); ?>">
+						<?php echo esc_html( get_the_title( $related_id ) ); ?>
+					</button>
+				</li>
+			<?php endforeach; ?>
+		</ul>
+	<?php else : ?>
+		<p class="vyts-no-items"><?php esc_html_e( 'No related posts or pages found in the same silo.', 'v-yoast-topic-silos' ); ?></p>
+	<?php endif; ?>
+
+	<?php if ( $has_other ) : ?>
+		<p class="vyts-section-heading"><?php esc_html_e( 'Other Links', 'v-yoast-topic-silos' ); ?></p>
+		<ul class="vyts-silo-list">
+			<?php while ( $other_query->have_posts() ) : ?>
+				<?php $other_query->the_post(); ?>
+				<li>
+					<button type="button"
+					   class="vyts-copy-link"
+					   data-copy-url="<?php echo esc_url( get_permalink() ); ?>"
+					   title="<?php echo esc_attr( get_the_title() ); ?>">
+						<?php echo esc_html( get_the_title() ); ?>
+					</button>
+				</li>
+			<?php endwhile; ?>
+		</ul>
+	<?php endif; ?>
+
 	<span class="vyts-copied-notice" style="display:none;" aria-live="polite">
 		<?php esc_html_e( 'Copied!', 'v-yoast-topic-silos' ); ?>
 	</span>
@@ -142,6 +195,7 @@ function vyts_enqueue_metabox_assets( $hook_suffix ) {
 		.vyts-copy-link:hover { text-decoration: underline; }
 		.vyts-copied-notice { display: inline-block; margin-top: 6px; padding: 2px 8px; background: #00a32a; color: #fff; border-radius: 3px; font-size: 12px; }
 		.vyts-instructions { color: #646970; font-style: italic; margin-bottom: 6px; }
+		.vyts-section-heading { font-weight: 600; margin: 10px 0 4px; border-bottom: 1px solid #dcdcde; padding-bottom: 4px; }
 	';
 
 	// Register a plugin-specific handle so wp_add_inline_style is guaranteed to print.
