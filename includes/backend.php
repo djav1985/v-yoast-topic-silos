@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 // -----------------------------
 add_action( 'add_meta_boxes', 'vyts_register_silo_metabox' );
 add_action( 'add_meta_boxes', 'vyts_register_page_category_metabox' );
-add_action( 'save_post_page', 'vyts_save_page_category', 10, 2 );
+add_action( 'save_post_page', 'vyts_save_page_category', 10, 1 );
 add_action( 'admin_enqueue_scripts', 'vyts_enqueue_metabox_assets' );
 
 /**
@@ -101,10 +101,9 @@ function vyts_render_page_category_metabox( $post ) {
 /**
  * Saves the Page Category metabox data on page save.
  *
- * @param int     $post_id Post ID.
- * @param WP_Post $post    Post object.
+ * @param int $post_id Post ID.
  */
-function vyts_save_page_category( $post_id, $post ) {
+function vyts_save_page_category( $post_id ) {
 	// Bail on autosave and revisions.
 	if ( wp_is_post_autosave( $post_id ) || wp_is_post_revision( $post_id ) ) {
 		return;
