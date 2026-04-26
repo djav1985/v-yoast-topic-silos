@@ -242,13 +242,16 @@ function vyts_render_silo_metabox( $post ) {
 
 	$other_query = new WP_Query(
 		array(
-			'post_type'           => array( 'post', 'page' ),
-			'post_status'         => 'publish',
-			'posts_per_page'      => 50,
-			'post__not_in'        => $excluded_ids,
-			'ignore_sticky_posts' => true,
-			'orderby'             => 'title',
-			'order'               => 'ASC',
+			'post_type'              => array( 'post', 'page' ),
+			'post_status'            => 'publish',
+			'posts_per_page'         => 50,
+			'post__not_in'           => $excluded_ids,
+			'ignore_sticky_posts'    => true,
+			'orderby'                => 'title',
+			'order'                  => 'ASC',
+			'no_found_rows'          => true,
+			'update_post_meta_cache' => false,
+			'update_post_term_cache' => false,
 		)
 	);
 
