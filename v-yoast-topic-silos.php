@@ -51,6 +51,21 @@ function vyts_default_settings() {
 }
 
 /**
+ * Returns merged plugin settings with defaults, cached for the request lifetime.
+ *
+ * @return array<string, mixed>
+ */
+function vyts_get_settings() {
+	static $settings = null;
+
+	if ( null === $settings ) {
+		$settings = wp_parse_args( (array) get_option( 'vyts_settings', array() ), vyts_default_settings() );
+	}
+
+	return $settings;
+}
+
+/**
  * Plugin activation callback.
  *
  * Seeds the vyts_settings option with defaults if it does not already exist.

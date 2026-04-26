@@ -402,12 +402,26 @@ function vyts_set_yoast_social_images( $post_id ) {
 		return;
 	}
 
+	$post_type = get_post_type( $post_id );
+	if ( 'post' !== $post_type && 'page' !== $post_type ) {
+		return;
+	}
+
 	if ( has_post_thumbnail( $post_id ) ) {
 		$featured_image_url = get_the_post_thumbnail_url( $post_id, 'full' );
 
 		if ( ! empty( $featured_image_url ) ) {
-			update_post_meta( $post_id, '_yoast_wpseo_opengraph-image', esc_url_raw( $featured_image_url ) );
-			update_post_meta( $post_id, '_yoast_wpseo_twitter-image', esc_url_raw( $featured_image_url ) );
+			$featured_image_url = esc_url_raw( $featured_image_url );
+
+			$existing_og = get_post_meta( $post_id, '_yoast_wpseo_opengraph-image', true );
+			if ( $existing_og !== $featured_image_url ) {
+				update_post_meta( $post_id, '_yoast_wpseo_opengraph-image', $featured_image_url );
+			}
+
+			$existing_twitter = get_post_meta( $post_id, '_yoast_wpseo_twitter-image', true );
+			if ( $existing_twitter !== $featured_image_url ) {
+				update_post_meta( $post_id, '_yoast_wpseo_twitter-image', $featured_image_url );
+			}
 		}
 	}
 }
