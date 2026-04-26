@@ -161,10 +161,8 @@ function vyts_save_page_category( $post_id, $post ) {
  * @param WP_Post $post Current post object.
  */
 function vyts_render_silo_metabox( $post ) {
-	// Collect category IDs and tag IDs separately so each taxonomy clause only
-	// receives term IDs that actually belong to that taxonomy.
+	// Silo grouping is category-only; tags play no part.
 	$category_ids = array();
-	$tag_ids      = array();
 
 	if ( 'page' === $post->post_type ) {
 		// Pages don't have built-in category support; use the custom meta field.
@@ -179,44 +177,15 @@ function vyts_render_silo_metabox( $post ) {
 		foreach ( $categories as $cat ) {
 			$category_ids[] = (int) $cat->term_id;
 		}
-
-		$tags = get_the_tags( $post->ID );
-		if ( is_array( $tags ) ) {
-			foreach ( $tags as $tag ) {
-				$tag_ids[] = (int) $tag->term_id;
-			}
-		}
 	}
 
-	// --- Build related-posts query (same category or tag) ---
-	// Posts are in the WP category/tag taxonomy; pages are not, so they must be
+	// --- Build related-posts query (same category) ---
+	// Posts are in the WP category taxonomy; pages are not, so they must be
 	// queried separately via the _vyts_page_category_ids meta field.
 	$related_post_ids = array();
 
-	if ( ! empty( $category_ids ) || ! empty( $tag_ids ) ) {
-		// Sub-query A: regular posts matched by taxonomy.
-		$tax_query = array( 'relation' => 'OR' ); // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query
-
-		if ( ! empty( $category_ids ) ) {
-			$tax_query[] = array(
-				'taxonomy'         => 'category',
-				'field'            => 'term_id',
-				'terms'            => $category_ids,
-				'operator'         => 'IN',
-				'include_children' => false,
-			);
-		}
-
-		if ( ! empty( $tag_ids ) ) {
-			$tax_query[] = array(
-				'taxonomy'         => 'post_tag',
-				'field'            => 'term_id',
-				'terms'            => $tag_ids,
-				'operator'         => 'IN',
-				'include_children' => false,
-			);
-		}
-
+	if ( ! empty( $category_ids ) ) {
+		// Sub-query A: regular posts matched by category taxonomy.
 		$related_post_ids = get_posts( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query
 			array(
 				'post_type'           => 'post',
@@ -227,7 +196,15 @@ function vyts_render_silo_metabox( $post ) {
 				'orderby'             => 'title',
 				'order'               => 'ASC',
 				'fields'              => 'ids',
-				'tax_query'           => $tax_query, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query
+				'tax_query'           => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query
+					array(
+						'taxonomy'         => 'category',
+						'field'            => 'term_id',
+						'terms'            => $category_ids,
+						'operator'         => 'IN',
+						'include_children' => false,
+					),
+				),
 			)
 		);
 	}
