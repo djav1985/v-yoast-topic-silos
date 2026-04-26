@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // -----------------------------
-// Topic-silo metabox: register, render, and enqueue assets.
+// Topic Cluster metaboxes: register, render, save, and enqueue assets.
 // -----------------------------
 add_action( 'add_meta_boxes', 'vyts_register_silo_metabox' );
 add_action( 'add_meta_boxes', 'vyts_register_page_category_metabox' );
