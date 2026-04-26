@@ -147,10 +147,10 @@ function vyts_save_page_category( $post_id, $post ) {
  * Renders the Topic Cluster metabox content.
  *
  * Displays two sections:
- *   - Related Links: posts and pages that share a category or tag with the
+ *   - Related Links: posts and pages that share a category with the
  *     current post (i.e. within the same topic cluster / silo).
  *   - Other Links: all other published posts and pages that are not in the
- *     current silo, useful for cross-silo internal linking.
+ *     current category-based silo, useful for cross-silo internal linking.
  *
  * Each link copies the permalink to the clipboard instead of navigating away.
  *
