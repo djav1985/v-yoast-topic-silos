@@ -147,9 +147,13 @@ function vyts_save_page_category( $post_id ) {
  *
  * Displays two sections:
  *   - Related Links: posts and pages that share a category with the
- *     current post (i.e. within the same topic cluster / silo).
+ *     current post (i.e. within the same topic cluster / silo), grouped
+ *     into "Pages (N):" and "Posts (N):" subsections with counts.
+ *     When the current post has multiple categories, items from all of
+ *     those categories are included.
  *   - Other Links: all other published posts and pages that are not in the
- *     current category-based silo, useful for cross-silo internal linking.
+ *     current category-based silo, also grouped into Pages and Posts
+ *     subsections, useful for cross-silo internal linking.
  *
  * Each link copies the permalink to the clipboard instead of navigating away.
  *
@@ -262,49 +266,145 @@ function vyts_render_silo_metabox( $post ) {
 		wp_reset_postdata();
 		return;
 	}
+
+	// --- Split related IDs into pages and posts for grouped display ---
+	$related_pages_display = array();
+	$related_posts_display = array();
+	foreach ( $related_post_ids as $rid ) {
+		if ( 'page' === get_post_type( $rid ) ) {
+			$related_pages_display[] = $rid;
+		} else {
+			$related_posts_display[] = $rid;
+		}
+	}
+
+	// --- Split other IDs into pages and posts for grouped display ---
+	$other_pages_display = array();
+	$other_posts_display = array();
+	while ( $other_query->have_posts() ) {
+		$other_query->the_post();
+		if ( 'page' === get_post_type() ) {
+			$other_pages_display[] = get_the_ID();
+		} else {
+			$other_posts_display[] = get_the_ID();
+		}
+	}
+	wp_reset_postdata();
 	?>
 	<p class="vyts-instructions"><?php esc_html_e( 'Click a link to copy its URL to your clipboard.', 'v-yoast-topic-silos' ); ?></p>
 
 	<?php if ( $has_related ) : ?>
 		<p class="vyts-section-heading"><?php esc_html_e( 'Related Links', 'v-yoast-topic-silos' ); ?></p>
-		<ul class="vyts-silo-list">
-			<?php foreach ( $related_post_ids as $related_id ) : ?>
-				<li>
-					<button type="button"
-					   class="vyts-copy-link"
-					   data-copy-url="<?php echo esc_url( get_permalink( $related_id ) ); ?>"
-					   title="<?php echo esc_attr( get_the_title( $related_id ) ); ?>">
-						<?php echo esc_html( get_the_title( $related_id ) ); ?>
-					</button>
-				</li>
-			<?php endforeach; ?>
-		</ul>
+
+		<?php if ( ! empty( $related_pages_display ) ) : ?>
+			<p class="vyts-sub-heading">
+				<?php
+				printf(
+					/* translators: %d: number of related pages */
+					esc_html( _n( 'Page (%d):', 'Pages (%d):', count( $related_pages_display ), 'v-yoast-topic-silos' ) ),
+					count( $related_pages_display )
+				);
+				?>
+			</p>
+			<ul class="vyts-silo-list">
+				<?php foreach ( $related_pages_display as $related_id ) : ?>
+					<li>
+						<button type="button"
+						   class="vyts-copy-link"
+						   data-copy-url="<?php echo esc_url( get_permalink( $related_id ) ); ?>"
+						   title="<?php echo esc_attr( get_the_title( $related_id ) ); ?>">
+							<?php echo esc_html( get_the_title( $related_id ) ); ?>
+						</button>
+					</li>
+				<?php endforeach; ?>
+			</ul>
+		<?php endif; ?>
+
+		<?php if ( ! empty( $related_posts_display ) ) : ?>
+			<p class="vyts-sub-heading">
+				<?php
+				printf(
+					/* translators: %d: number of related posts */
+					esc_html( _n( 'Post (%d):', 'Posts (%d):', count( $related_posts_display ), 'v-yoast-topic-silos' ) ),
+					count( $related_posts_display )
+				);
+				?>
+			</p>
+			<ul class="vyts-silo-list">
+				<?php foreach ( $related_posts_display as $related_id ) : ?>
+					<li>
+						<button type="button"
+						   class="vyts-copy-link"
+						   data-copy-url="<?php echo esc_url( get_permalink( $related_id ) ); ?>"
+						   title="<?php echo esc_attr( get_the_title( $related_id ) ); ?>">
+							<?php echo esc_html( get_the_title( $related_id ) ); ?>
+						</button>
+					</li>
+				<?php endforeach; ?>
+			</ul>
+		<?php endif; ?>
+
 	<?php else : ?>
 		<p class="vyts-no-items"><?php esc_html_e( 'No related posts or pages found in the same silo.', 'v-yoast-topic-silos' ); ?></p>
 	<?php endif; ?>
 
 	<?php if ( $has_other ) : ?>
 		<p class="vyts-section-heading"><?php esc_html_e( 'Other Links', 'v-yoast-topic-silos' ); ?></p>
-		<ul class="vyts-silo-list">
-			<?php while ( $other_query->have_posts() ) : ?>
-				<?php $other_query->the_post(); ?>
-				<li>
-					<button type="button"
-					   class="vyts-copy-link"
-					   data-copy-url="<?php echo esc_url( get_permalink() ); ?>"
-					   title="<?php echo esc_attr( get_the_title() ); ?>">
-						<?php echo esc_html( get_the_title() ); ?>
-					</button>
-				</li>
-			<?php endwhile; ?>
-		</ul>
+
+		<?php if ( ! empty( $other_pages_display ) ) : ?>
+			<p class="vyts-sub-heading">
+				<?php
+				printf(
+					/* translators: %d: number of other pages */
+					esc_html( _n( 'Page (%d):', 'Pages (%d):', count( $other_pages_display ), 'v-yoast-topic-silos' ) ),
+					count( $other_pages_display )
+				);
+				?>
+			</p>
+			<ul class="vyts-silo-list">
+				<?php foreach ( $other_pages_display as $other_id ) : ?>
+					<li>
+						<button type="button"
+						   class="vyts-copy-link"
+						   data-copy-url="<?php echo esc_url( get_permalink( $other_id ) ); ?>"
+						   title="<?php echo esc_attr( get_the_title( $other_id ) ); ?>">
+							<?php echo esc_html( get_the_title( $other_id ) ); ?>
+						</button>
+					</li>
+				<?php endforeach; ?>
+			</ul>
+		<?php endif; ?>
+
+		<?php if ( ! empty( $other_posts_display ) ) : ?>
+			<p class="vyts-sub-heading">
+				<?php
+				printf(
+					/* translators: %d: number of other posts */
+					esc_html( _n( 'Post (%d):', 'Posts (%d):', count( $other_posts_display ), 'v-yoast-topic-silos' ) ),
+					count( $other_posts_display )
+				);
+				?>
+			</p>
+			<ul class="vyts-silo-list">
+				<?php foreach ( $other_posts_display as $other_id ) : ?>
+					<li>
+						<button type="button"
+						   class="vyts-copy-link"
+						   data-copy-url="<?php echo esc_url( get_permalink( $other_id ) ); ?>"
+						   title="<?php echo esc_attr( get_the_title( $other_id ) ); ?>">
+							<?php echo esc_html( get_the_title( $other_id ) ); ?>
+						</button>
+					</li>
+				<?php endforeach; ?>
+			</ul>
+		<?php endif; ?>
+
 	<?php endif; ?>
 
 	<span class="vyts-copied-notice" style="display:none;" aria-live="polite">
 		<?php esc_html_e( 'Copied!', 'v-yoast-topic-silos' ); ?>
 	</span>
 	<?php
-	wp_reset_postdata();
 }
 
 /**
@@ -329,6 +429,7 @@ function vyts_enqueue_metabox_assets( $hook_suffix ) {
 		.vyts-copied-notice { display: inline-block; margin-top: 6px; padding: 2px 8px; background: #00a32a; color: #fff; border-radius: 3px; font-size: 12px; }
 		.vyts-instructions { color: #646970; font-style: italic; margin-bottom: 6px; }
 		.vyts-section-heading { font-weight: 600; margin: 10px 0 4px; border-bottom: 1px solid #dcdcde; padding-bottom: 4px; }
+		.vyts-sub-heading { font-weight: 600; margin: 8px 0 2px; font-size: 12px; color: #50575e; }
 		.vyts-category-list { margin: 0; padding: 0; list-style: none; }
 		.vyts-category-list li { margin: 4px 0; }
 		.vyts-category-list label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
