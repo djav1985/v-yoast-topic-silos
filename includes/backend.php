@@ -178,10 +178,11 @@ function vyts_render_silo_metabox( $post ) {
 		}
 	}
 
-	// --- Build related-posts query (same category) ---
-	// Posts are in the WP category taxonomy; pages are not, so they must be
-	// queried separately via the _vyts_page_category_ids meta field.
+	// --- Build related-content queries (same category) ---
+	// Posts are in the WP category taxonomy; pages are not, so they are queried
+	// separately via the _vyts_page_category_ids meta field.
 	$related_post_ids = array();
+	$related_page_ids = array();
 
 	if ( ! empty( $category_ids ) ) {
 		// Sub-query A: regular posts matched by category taxonomy.
@@ -233,11 +234,12 @@ function vyts_render_silo_metabox( $post ) {
 			)
 		);
 
-		$related_post_ids = array_unique( array_merge( $related_post_ids, $related_page_ids ) );
 	}
 
-	// --- Build other-posts query (all published posts/pages outside this silo) ---
-	$excluded_ids = array_merge( array( $post->ID ), $related_post_ids );
+	$all_related_ids = array_unique( array_merge( $related_post_ids, $related_page_ids ) );
+
+	// --- Build unrelated query (all published posts/pages outside this silo) ---
+	$excluded_ids = array_merge( array( $post->ID ), $all_related_ids );
 
 	$other_query = new WP_Query(
 		array(
@@ -254,57 +256,185 @@ function vyts_render_silo_metabox( $post ) {
 		)
 	);
 
-	$has_related = ! empty( $related_post_ids );
-	$has_other   = $other_query->have_posts();
-
-	if ( ! $has_related && ! $has_other ) {
-		echo '<p class="vyts-no-items">' . esc_html__( 'No related posts or pages found.', 'v-yoast-topic-silos' ) . '</p>';
-		wp_reset_postdata();
-		return;
+	$other_ids = array();
+	if ( $other_query->have_posts() ) {
+		while ( $other_query->have_posts() ) {
+			$other_query->the_post();
+			$other_ids[] = get_the_ID();
+		}
 	}
+	wp_reset_postdata();
+
+	$link_map = vyts_extract_internal_post_links( $post->post_content );
+
+	$related_posts_linking_to_current = vyts_count_posts_linking_to_target( $related_post_ids, $post->ID );
+	$related_pages_linking_to_current = vyts_count_posts_linking_to_target( $related_page_ids, $post->ID );
+	$other_items_linking_to_current   = vyts_count_posts_linking_to_target( $other_ids, $post->ID );
+
+	$outbound_related_posts = vyts_count_outbound_links_to_ids( $link_map, $related_post_ids );
+	$outbound_related_pages = vyts_count_outbound_links_to_ids( $link_map, $related_page_ids );
+	$outbound_other_items   = vyts_count_outbound_links_to_ids( $link_map, $other_ids );
+
+	$remaining_related_posts = array_values(
+		array_filter(
+			$related_post_ids,
+			function ( $id ) use ( $link_map ) {
+				return empty( $link_map[ $id ] );
+			}
+		)
+	);
+	$remaining_related_pages = array_values(
+		array_filter(
+			$related_page_ids,
+			function ( $id ) use ( $link_map ) {
+				return empty( $link_map[ $id ] );
+			}
+		)
+	);
+
+	$other_links_to_current = vyts_get_ids_linking_to_target( $other_ids, $post->ID );
+	$other_links_from_page  = array_values(
+		array_filter(
+			array_keys( $link_map ),
+			function ( $id ) use ( $other_ids ) {
+				return in_array( (int) $id, $other_ids, true );
+			}
+		)
+	);
 	?>
 	<p class="vyts-instructions"><?php esc_html_e( 'Click a link to copy its URL to your clipboard.', 'v-yoast-topic-silos' ); ?></p>
 
-	<?php if ( $has_related ) : ?>
-		<p class="vyts-section-heading"><?php esc_html_e( 'Related Links', 'v-yoast-topic-silos' ); ?></p>
-		<ul class="vyts-silo-list">
-			<?php foreach ( $related_post_ids as $related_id ) : ?>
-				<li>
-					<button type="button"
-					   class="vyts-copy-link"
-					   data-copy-url="<?php echo esc_url( get_permalink( $related_id ) ); ?>"
-					   title="<?php echo esc_attr( get_the_title( $related_id ) ); ?>">
-						<?php echo esc_html( get_the_title( $related_id ) ); ?>
-					</button>
-				</li>
-			<?php endforeach; ?>
-		</ul>
-	<?php else : ?>
-		<p class="vyts-no-items"><?php esc_html_e( 'No related posts or pages found in the same silo.', 'v-yoast-topic-silos' ); ?></p>
-	<?php endif; ?>
+	<p class="vyts-section-heading"><?php esc_html_e( 'Post Summary:', 'v-yoast-topic-silos' ); ?></p>
+	<p><?php echo esc_html( count( $related_post_ids ) . ' related posts' ); ?></p>
+	<p><?php echo esc_html( $related_posts_linking_to_current . ' posts link to this page' ); ?></p>
+	<p><?php echo esc_html( $outbound_related_posts . ' outbound links to posts from this page' ); ?></p>
 
-	<?php if ( $has_other ) : ?>
-		<p class="vyts-section-heading"><?php esc_html_e( 'Other Links', 'v-yoast-topic-silos' ); ?></p>
-		<ul class="vyts-silo-list">
-			<?php while ( $other_query->have_posts() ) : ?>
-				<?php $other_query->the_post(); ?>
-				<li>
-					<button type="button"
-					   class="vyts-copy-link"
-					   data-copy-url="<?php echo esc_url( get_permalink() ); ?>"
-					   title="<?php echo esc_attr( get_the_title() ); ?>">
-						<?php echo esc_html( get_the_title() ); ?>
-					</button>
-				</li>
-			<?php endwhile; ?>
-		</ul>
-	<?php endif; ?>
+	<p class="vyts-section-heading"><?php esc_html_e( 'Remaining Post Links:', 'v-yoast-topic-silos' ); ?></p>
+	<?php vyts_render_copy_link_list( $remaining_related_posts ); ?>
+
+	<p class="vyts-section-heading"><?php esc_html_e( 'Page Summary:', 'v-yoast-topic-silos' ); ?></p>
+	<p><?php echo esc_html( count( $related_page_ids ) . ' related pages' ); ?></p>
+	<p><?php echo esc_html( $related_pages_linking_to_current . ' pages link to this page' ); ?></p>
+	<p><?php echo esc_html( $outbound_related_pages . ' outbound links to pages from this page' ); ?></p>
+
+	<p class="vyts-section-heading"><?php esc_html_e( 'Remaining Page Links:', 'v-yoast-topic-silos' ); ?></p>
+	<?php vyts_render_copy_link_list( $remaining_related_pages ); ?>
+
+	<p class="vyts-section-heading"><?php esc_html_e( 'Unrelated Summary:', 'v-yoast-topic-silos' ); ?></p>
+	<p><?php echo esc_html( $other_items_linking_to_current . ' posts link to this posts/pages' ); ?></p>
+	<p><?php echo esc_html( $outbound_other_items . ' outbound links to posts/pages from this page/Posts' ); ?></p>
+
+	<p class="vyts-section-heading"><?php esc_html_e( 'Other Links To This post/page:', 'v-yoast-topic-silos' ); ?></p>
+	<?php vyts_render_copy_link_list( $other_links_to_current ); ?>
+
+	<p class="vyts-section-heading"><?php esc_html_e( 'Other Links From This Post/Page:', 'v-yoast-topic-silos' ); ?></p>
+	<?php vyts_render_copy_link_list( $other_links_from_page ); ?>
 
 	<span class="vyts-copied-notice" style="display:none;" aria-live="polite">
 		<?php esc_html_e( 'Copied!', 'v-yoast-topic-silos' ); ?>
 	</span>
 	<?php
 	wp_reset_postdata();
+}
+
+/**
+ * Extracts internal links from content and maps target post IDs to occurrence counts.
+ *
+ * @param string $content Raw post content.
+ * @return array<int,int> Array in the form [ post_id => count ].
+ */
+function vyts_extract_internal_post_links( $content ) {
+	$map = array();
+	if ( empty( $content ) ) {
+		return $map;
+	}
+
+	if ( preg_match_all( '/<a\b[^>]*href=(["\'])(.*?)\1/i', $content, $matches ) ) {
+		foreach ( $matches[2] as $href ) {
+			$target_id = url_to_postid( $href );
+			if ( $target_id > 0 ) {
+				if ( ! isset( $map[ $target_id ] ) ) {
+					$map[ $target_id ] = 0;
+				}
+				++$map[ $target_id ];
+			}
+		}
+	}
+
+	return $map;
+}
+
+/**
+ * Counts how many posts in a list link to a target post ID.
+ *
+ * @param int[] $source_ids Source post IDs.
+ * @param int   $target_id  Target post ID.
+ * @return int
+ */
+function vyts_count_posts_linking_to_target( $source_ids, $target_id ) {
+	return count( vyts_get_ids_linking_to_target( $source_ids, $target_id ) );
+}
+
+/**
+ * Gets source post IDs that link to a target post ID.
+ *
+ * @param int[] $source_ids Source post IDs.
+ * @param int   $target_id  Target post ID.
+ * @return int[]
+ */
+function vyts_get_ids_linking_to_target( $source_ids, $target_id ) {
+	$linking_ids = array();
+	foreach ( $source_ids as $source_id ) {
+		$content = (string) get_post_field( 'post_content', $source_id );
+		$links   = vyts_extract_internal_post_links( $content );
+		if ( ! empty( $links[ $target_id ] ) ) {
+			$linking_ids[] = (int) $source_id;
+		}
+	}
+	return $linking_ids;
+}
+
+/**
+ * Counts outbound links from a link map into a specific set of post IDs.
+ *
+ * @param array<int,int> $link_map   Source link map [post_id => count].
+ * @param int[]          $target_ids Target post IDs.
+ * @return int
+ */
+function vyts_count_outbound_links_to_ids( $link_map, $target_ids ) {
+	$count = 0;
+	foreach ( $target_ids as $target_id ) {
+		if ( isset( $link_map[ $target_id ] ) ) {
+			$count += (int) $link_map[ $target_id ];
+		}
+	}
+	return $count;
+}
+
+/**
+ * Renders a copy-link list from post IDs.
+ *
+ * @param int[] $post_ids Post IDs to render.
+ */
+function vyts_render_copy_link_list( $post_ids ) {
+	if ( empty( $post_ids ) ) {
+		echo '<p class="vyts-no-items">' . esc_html__( 'None.', 'v-yoast-topic-silos' ) . '</p>';
+		return;
+	}
+	?>
+	<ul class="vyts-silo-list">
+		<?php foreach ( $post_ids as $listed_id ) : ?>
+			<li>
+				<button type="button"
+					class="vyts-copy-link"
+					data-copy-url="<?php echo esc_url( get_permalink( $listed_id ) ); ?>"
+					title="<?php echo esc_attr( get_the_title( $listed_id ) ); ?>">
+					<?php echo esc_html( get_the_title( $listed_id ) ); ?>
+				</button>
+			</li>
+		<?php endforeach; ?>
+	</ul>
+	<?php
 }
 
 /**
