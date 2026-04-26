@@ -30,7 +30,7 @@ add_filter( 'wpseo_schema_graph', 'vyts_replace_place_with_localbusiness', 10, 2
  */
 function vyts_replace_place_with_localbusiness( $data, $context ) {
 	foreach ( $data as $key => $value ) {
-		if ( is_array( $value['@type'] ) && in_array( 'Place', $value['@type'], true ) ) {
+		if ( isset( $value['@type'] ) && is_array( $value['@type'] ) && in_array( 'Place', $value['@type'], true ) ) {
 			$data[ $key ]['@type'] = array_values( array_diff( $value['@type'], array( 'Place' ) ) );
 		}
 	}
@@ -46,8 +46,17 @@ add_action( 'wp_head', 'vyts_add_dublin_core_metadata', 11 );
  * Outputs Dublin Core metadata tags in the page head.
  */
 function vyts_add_dublin_core_metadata() {
-	$yoast_meta_description = get_post_meta( get_the_ID(), '_yoast_wpseo_metadesc', true );
-	$yoast_focus_keywords   = get_post_meta( get_the_ID(), '_yoast_wpseo_focuskw', true );
+	if ( ! is_singular() ) {
+		return;
+	}
+
+	$post_id = get_queried_object_id();
+	if ( ! $post_id ) {
+		return;
+	}
+
+	$yoast_meta_description = get_post_meta( $post_id, '_yoast_wpseo_metadesc', true );
+	$yoast_focus_keywords   = get_post_meta( $post_id, '_yoast_wpseo_focuskw', true );
 	$site_name              = get_bloginfo( 'name' );
 	$modified_date          = get_the_modified_date( 'Y-m-d' );
 	?>
@@ -74,7 +83,7 @@ add_filter( 'wpseo_schema_graph', 'vyts_force_org_as_author', 20 );
  * @return array Modified schema graph data.
  */
 function vyts_force_org_as_author( $graph ) {
-	$settings = wp_parse_args( (array) get_option( 'vyts_settings', array() ), vyts_default_settings() );
+	$settings = vyts_get_settings();
 
 	foreach ( $graph as $key => &$node ) {
 		// Remove standalone @type: Person blocks.
