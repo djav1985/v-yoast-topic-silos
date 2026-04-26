@@ -143,53 +143,85 @@ function vyts_save_page_category( $post_id ) {
 }
 
 /**
+ * Normalises a URL for string comparison by stripping the scheme and trailing slash.
+ *
+ * Used when matching hrefs found in post content against known permalinks so
+ * that http:// and https:// variants, and the presence or absence of a trailing
+ * slash, do not cause false negatives.
+ *
+ * @param string $url Raw URL string (may include query string and fragment).
+ * @return string Normalised URL, or empty string when the input is blank.
+ */
+function vyts_normalize_url_for_comparison( $url ) {
+	// Strip query string and fragment before any further processing.
+	$url = strtok( trim( $url ), '?#' );
+	if ( ! $url ) {
+		return '';
+	}
+	// Remove http:// or https://.
+	$url = preg_replace( '#^https?://#i', '', $url );
+	// Drop the trailing slash so both forms compare equal.
+	return rtrim( $url, '/' );
+}
+
+/**
  * Renders the Topic Cluster metabox content.
  *
- * Displays two sections:
- *   - Related Links: posts and pages that share a category with the
- *     current post (i.e. within the same topic cluster / silo), grouped
- *     into "Pages (N):" and "Posts (N):" subsections with counts.
- *     When the current post has multiple categories, items from all of
- *     those categories are included.
- *   - Other Links: all other published posts and pages that are not in the
- *     current category-based silo, also grouped into Pages and Posts
- *     subsections, useful for cross-silo internal linking.
+ * Displays three summary sections:
  *
- * Each link copies the permalink to the clipboard instead of navigating away.
+ *   Post Summary
+ *     - Total related posts (same silo).
+ *     - How many of those posts contain an inbound link to the current post.
+ *     - How many of those posts the current post links out to.
+ *     - "Remaining Post Links" – related posts not yet linked from this post.
  *
- * For pages, the category affiliation is taken from the custom
- * _vyts_page_category_ids meta field (set via the Page Category metabox).
+ *   Page Summary
+ *     - Same metrics for related pages.
+ *
+ *   Unrelated Summary
+ *     - Unrelated posts/pages that link inbound to the current post.
+ *     - Unrelated posts/pages the current post links out to.
+ *     - "Other Links To This Post/Page" list (inbound from unrelated).
+ *     - "Other Links From This Post/Page" list (outbound to unrelated).
+ *
+ * A ⚠️ warning is appended to any zero count to flag SEO gaps.
+ * Clicking a link copies its permalink to the clipboard.
+ *
+ * For pages, silo membership comes from the _vyts_page_category_ids meta field.
  * For posts, the standard WordPress category taxonomy is used.
  *
  * @param WP_Post $post Current post object.
  */
 function vyts_render_silo_metabox( $post ) {
-	// Silo grouping is category-only; tags play no part.
+	// -----------------------------------------------------------------------
+	// Step 1 – Determine the current post's silo category IDs.
+	// -----------------------------------------------------------------------
 	$category_ids = array();
 
 	if ( 'page' === $post->post_type ) {
 		// Pages don't have built-in category support; use the custom meta field.
-		// Values are stored as individual meta rows, so pass false to get all rows.
 		$saved = get_post_meta( $post->ID, '_vyts_page_category_ids', false );
 		if ( is_array( $saved ) ) {
-			$category_ids = array_filter( array_map( 'intval', $saved ), function ( $id ) { return $id > 0; } );
+			$category_ids = array_values(
+				array_filter( array_map( 'intval', $saved ), function ( $id ) { return $id > 0; } )
+			);
 		}
 	} else {
 		// Posts: use the standard WordPress category taxonomy.
-		$categories = get_the_category( $post->ID );
-		foreach ( $categories as $cat ) {
+		foreach ( get_the_category( $post->ID ) as $cat ) {
 			$category_ids[] = (int) $cat->term_id;
 		}
 	}
 
-	// --- Build related-posts query (same category) ---
-	// Posts are in the WP category taxonomy; pages are not, so they must be
-	// queried separately via the _vyts_page_category_ids meta field.
-	$related_post_ids = array();
+	// -----------------------------------------------------------------------
+	// Step 2 – Build silo IDs split by post type.
+	// -----------------------------------------------------------------------
+	$silo_post_ids = array();
+	$silo_page_ids = array();
 
 	if ( ! empty( $category_ids ) ) {
 		// Sub-query A: regular posts matched by category taxonomy.
-		$related_post_ids = get_posts( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query
+		$silo_post_ids = get_posts( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query
 			array(
 				'post_type'           => 'post',
 				'post_status'         => 'publish',
@@ -210,13 +242,9 @@ function vyts_render_silo_metabox( $post ) {
 				),
 			)
 		);
-	}
 
-	// Sub-query B: pages matched by _vyts_page_category_ids meta.
-	// Pages are not part of the WP category taxonomy, so tax_query cannot find
-	// them; instead compare against the custom meta rows stored per category ID.
-	if ( ! empty( $category_ids ) ) {
-		$related_page_ids = get_posts( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+		// Sub-query B: pages matched by _vyts_page_category_ids meta.
+		$silo_page_ids = get_posts( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
 			array(
 				'post_type'           => 'page',
 				'post_status'         => 'publish',
@@ -236,169 +264,338 @@ function vyts_render_silo_metabox( $post ) {
 				),
 			)
 		);
-
-		$related_post_ids = array_unique( array_merge( $related_post_ids, $related_page_ids ) );
 	}
 
-	// --- Build other-posts query (all published posts/pages outside this silo) ---
-	$excluded_ids = array_merge( array( $post->ID ), $related_post_ids );
+	// -----------------------------------------------------------------------
+	// Step 3 – Build unrelated IDs (outside the silo) split by post type.
+	// -----------------------------------------------------------------------
+	$silo_ids = array_merge( $silo_post_ids, $silo_page_ids );
+	$excluded = array_merge( array( $post->ID ), $silo_ids );
 
-	$other_query = new WP_Query(
+	$other_post_ids = get_posts(
 		array(
-			'post_type'              => array( 'post', 'page' ),
-			'post_status'            => 'publish',
-			'posts_per_page'         => 50,
-			'post__not_in'           => $excluded_ids,
-			'ignore_sticky_posts'    => true,
-			'orderby'                => 'title',
-			'order'                  => 'ASC',
-			'no_found_rows'          => true,
-			'update_post_meta_cache' => false,
-			'update_post_term_cache' => false,
+			'post_type'           => 'post',
+			'post_status'         => 'publish',
+			'posts_per_page'      => 50,
+			'post__not_in'        => $excluded,
+			'ignore_sticky_posts' => true,
+			'orderby'             => 'title',
+			'order'               => 'ASC',
+			'fields'              => 'ids',
 		)
 	);
 
-	$has_related = ! empty( $related_post_ids );
-	$has_other   = $other_query->have_posts();
+	$other_page_ids = get_posts(
+		array(
+			'post_type'           => 'page',
+			'post_status'         => 'publish',
+			'posts_per_page'      => 50,
+			'post__not_in'        => $excluded,
+			'ignore_sticky_posts' => true,
+			'orderby'             => 'title',
+			'order'               => 'ASC',
+			'fields'              => 'ids',
+		)
+	);
 
-	if ( ! $has_related && ! $has_other ) {
-		echo '<p class="vyts-no-items">' . esc_html__( 'No related posts or pages found.', 'v-yoast-topic-silos' ) . '</p>';
-		wp_reset_postdata();
-		return;
-	}
+	$all_other_ids     = array_merge( $other_post_ids, $other_page_ids );
+	$all_candidate_ids = array_merge( $silo_ids, $all_other_ids );
 
-	// --- Split related IDs into pages and posts for grouped display ---
-	$related_pages_display = array();
-	$related_posts_display = array();
-	foreach ( $related_post_ids as $rid ) {
-		if ( 'page' === get_post_type( $rid ) ) {
-			$related_pages_display[] = $rid;
-		} else {
-			$related_posts_display[] = $rid;
+	// -----------------------------------------------------------------------
+	// Step 4 – Build a normalised-permalink → ID map for all candidates.
+	//          This avoids calling url_to_postid() for every href found.
+	// -----------------------------------------------------------------------
+	$permalink_map = array();
+	foreach ( $all_candidate_ids as $cid ) {
+		$norm = vyts_normalize_url_for_comparison( get_permalink( (int) $cid ) );
+		if ( $norm ) {
+			$permalink_map[ $norm ] = (int) $cid;
 		}
 	}
 
-	// --- Split other IDs into pages and posts for grouped display ---
-	$other_pages_display = array();
-	$other_posts_display = array();
-	while ( $other_query->have_posts() ) {
-		$other_query->the_post();
-		if ( 'page' === get_post_type() ) {
-			$other_pages_display[] = get_the_ID();
-		} else {
-			$other_posts_display[] = get_the_ID();
+	// -----------------------------------------------------------------------
+	// Step 5 – Detect outbound internal links FROM the current post content.
+	// -----------------------------------------------------------------------
+	$outbound_ids = array();
+
+	if ( ! empty( $permalink_map ) ) {
+		preg_match_all( '/\bhref=(?:"([^"]*)"|\'([^\']*)\'|([^"\'>\s]+))/i', $post->post_content, $href_matches );
+		$all_hrefs = array_values( array_filter( array_merge( $href_matches[1], $href_matches[2], $href_matches[3] ) ) );
+		foreach ( $all_hrefs as $href ) {
+			$href = trim( $href );
+			// Resolve root-relative paths to absolute URLs so normalisation works.
+			if ( '/' === substr( $href, 0, 1 ) && '/' !== substr( $href, 1, 1 ) ) {
+				$href = home_url( $href );
+			}
+			$norm = vyts_normalize_url_for_comparison( $href );
+			if ( $norm && isset( $permalink_map[ $norm ] ) ) {
+				$outbound_ids[] = $permalink_map[ $norm ];
+			}
 		}
+		$outbound_ids = array_values( array_unique( $outbound_ids ) );
 	}
-	wp_reset_postdata();
+
+	// -----------------------------------------------------------------------
+	// Step 6 – Detect inbound links: which candidates link TO the current post.
+	//          A single DB LIKE query across the candidate set is used instead
+	//          of fetching every post's content individually.
+	// -----------------------------------------------------------------------
+	$inbound_ids = array();
+
+	if ( ! empty( $all_candidate_ids ) ) {
+		global $wpdb;
+		$current_url   = get_permalink( $post->ID );
+		$url_no_scheme = preg_replace( '#^https?://#', '', rtrim( $current_url, '/' ) );
+		$like          = '%' . $wpdb->esc_like( $url_no_scheme ) . '%';
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared
+		$placeholders = implode( ',', array_fill( 0, count( $all_candidate_ids ), '%d' ) );
+		$query_args   = array_merge( array( $like ), array_map( 'intval', $all_candidate_ids ) );
+		$inbound_ids  = array_map( 'intval', (array) $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT ID FROM {$wpdb->posts} WHERE post_content LIKE %s AND ID IN ($placeholders)", // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+				$query_args
+			)
+		) );
+	}
+
+	// -----------------------------------------------------------------------
+	// Step 7 – Derive per-section metrics.
+	// -----------------------------------------------------------------------
+	$outbound_silo_post_ids = array_values( array_intersect( $outbound_ids, $silo_post_ids ) );
+	$outbound_silo_page_ids = array_values( array_intersect( $outbound_ids, $silo_page_ids ) );
+	$outbound_other_ids     = array_values( array_intersect( $outbound_ids, $all_other_ids ) );
+
+	$inbound_silo_post_ids = array_values( array_intersect( $inbound_ids, $silo_post_ids ) );
+	$inbound_silo_page_ids = array_values( array_intersect( $inbound_ids, $silo_page_ids ) );
+	$inbound_other_ids     = array_values( array_intersect( $inbound_ids, $all_other_ids ) );
+
+	// Remaining = silo items the current post does NOT yet link out to.
+	$remaining_post_ids = array_values( array_diff( $silo_post_ids, $outbound_silo_post_ids ) );
+	$remaining_page_ids = array_values( array_diff( $silo_page_ids, $outbound_silo_page_ids ) );
+
+	// Sort other inbound/outbound lists alphabetically by title for display.
+	$outbound_other_display = $outbound_other_ids;
+	$inbound_other_display  = $inbound_other_ids;
+	usort(
+		$outbound_other_display,
+		function ( $a, $b ) {
+			return strcmp( get_the_title( $a ), get_the_title( $b ) );
+		}
+	);
+	usort(
+		$inbound_other_display,
+		function ( $a, $b ) {
+			return strcmp( get_the_title( $a ), get_the_title( $b ) );
+		}
+	);
+
+	$type_label = 'page' === $post->post_type
+		? __( 'page', 'v-yoast-topic-silos' )
+		: __( 'post', 'v-yoast-topic-silos' );
+
 	?>
-	<p class="vyts-instructions"><?php esc_html_e( 'Click a link to copy its URL to your clipboard.', 'v-yoast-topic-silos' ); ?></p>
+	<p class="vyts-instructions"><?php esc_html_e( 'Click any link to copy its URL to your clipboard.', 'v-yoast-topic-silos' ); ?></p>
 
-	<?php if ( $has_related ) : ?>
-		<p class="vyts-section-heading"><?php esc_html_e( 'Related Links', 'v-yoast-topic-silos' ); ?></p>
+	<?php // ------------------------------------------------------------------ ?>
+	<?php // Post Summary                                                        ?>
+	<?php // ------------------------------------------------------------------ ?>
+	<p class="vyts-section-heading"><?php esc_html_e( 'Post Summary:', 'v-yoast-topic-silos' ); ?></p>
+	<ul class="vyts-summary-stats">
+		<li>
+			<?php
+			printf(
+				/* translators: %d: number of related posts */
+				esc_html( _n( '%d related post', '%d related posts', count( $silo_post_ids ), 'v-yoast-topic-silos' ) ),
+				count( $silo_post_ids )
+			);
+			?>
+		</li>
+		<li<?php echo empty( $inbound_silo_post_ids ) ? ' class="vyts-stat-warn"' : ''; ?>>
+			<?php
+			printf(
+				/* translators: 1: count, 2: post type label (post or page) */
+				esc_html( _n( '%1$d post links to this %2$s', '%1$d posts link to this %2$s', count( $inbound_silo_post_ids ), 'v-yoast-topic-silos' ) ),
+				count( $inbound_silo_post_ids ),
+				esc_html( $type_label )
+			);
+			if ( empty( $inbound_silo_post_ids ) ) {
+				echo ' ⚠️'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			}
+			?>
+		</li>
+		<li<?php echo empty( $outbound_silo_post_ids ) ? ' class="vyts-stat-warn"' : ''; ?>>
+			<?php
+			printf(
+				/* translators: 1: count, 2: post type label */
+				esc_html( _n( '%1$d outbound link to posts from this %2$s', '%1$d outbound links to posts from this %2$s', count( $outbound_silo_post_ids ), 'v-yoast-topic-silos' ) ),
+				count( $outbound_silo_post_ids ),
+				esc_html( $type_label )
+			);
+			if ( empty( $outbound_silo_post_ids ) ) {
+				echo ' ⚠️'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			}
+			?>
+		</li>
+	</ul>
 
-		<?php if ( ! empty( $related_pages_display ) ) : ?>
-			<p class="vyts-sub-heading">
-				<?php
-				printf(
-					/* translators: %d: number of related pages */
-					esc_html( _n( 'Page (%d):', 'Pages (%d):', count( $related_pages_display ), 'v-yoast-topic-silos' ) ),
-					count( $related_pages_display )
-				);
-				?>
-			</p>
-			<ul class="vyts-silo-list">
-				<?php foreach ( $related_pages_display as $related_id ) : ?>
-					<li>
-						<button type="button"
-						   class="vyts-copy-link"
-						   data-copy-url="<?php echo esc_url( get_permalink( $related_id ) ); ?>"
-						   title="<?php echo esc_attr( get_the_title( $related_id ) ); ?>">
-							<?php echo esc_html( get_the_title( $related_id ) ); ?>
-						</button>
-					</li>
-				<?php endforeach; ?>
-			</ul>
-		<?php endif; ?>
-
-		<?php if ( ! empty( $related_posts_display ) ) : ?>
-			<p class="vyts-sub-heading">
-				<?php
-				printf(
-					/* translators: %d: number of related posts */
-					esc_html( _n( 'Post (%d):', 'Posts (%d):', count( $related_posts_display ), 'v-yoast-topic-silos' ) ),
-					count( $related_posts_display )
-				);
-				?>
-			</p>
-			<ul class="vyts-silo-list">
-				<?php foreach ( $related_posts_display as $related_id ) : ?>
-					<li>
-						<button type="button"
-						   class="vyts-copy-link"
-						   data-copy-url="<?php echo esc_url( get_permalink( $related_id ) ); ?>"
-						   title="<?php echo esc_attr( get_the_title( $related_id ) ); ?>">
-							<?php echo esc_html( get_the_title( $related_id ) ); ?>
-						</button>
-					</li>
-				<?php endforeach; ?>
-			</ul>
-		<?php endif; ?>
-
-	<?php else : ?>
-		<p class="vyts-no-items"><?php esc_html_e( 'No related posts or pages found in the same silo.', 'v-yoast-topic-silos' ); ?></p>
+	<?php if ( ! empty( $remaining_post_ids ) ) : ?>
+		<p class="vyts-sub-heading"><?php esc_html_e( 'Remaining Post Links:', 'v-yoast-topic-silos' ); ?></p>
+		<ul class="vyts-silo-list">
+			<?php foreach ( $remaining_post_ids as $rid ) : ?>
+				<li>
+					<button type="button"
+					        class="vyts-copy-link"
+					        data-copy-url="<?php echo esc_url( get_permalink( $rid ) ); ?>"
+					        title="<?php echo esc_attr( get_the_title( $rid ) ); ?>">
+						<?php echo esc_html( get_the_title( $rid ) ); ?>
+					</button>
+				</li>
+			<?php endforeach; ?>
+		</ul>
 	<?php endif; ?>
 
-	<?php if ( $has_other ) : ?>
-		<p class="vyts-section-heading"><?php esc_html_e( 'Other Links', 'v-yoast-topic-silos' ); ?></p>
+	<?php // ------------------------------------------------------------------ ?>
+	<?php // Page Summary                                                        ?>
+	<?php // ------------------------------------------------------------------ ?>
+	<p class="vyts-section-heading"><?php esc_html_e( 'Page Summary:', 'v-yoast-topic-silos' ); ?></p>
+	<ul class="vyts-summary-stats">
+		<li>
+			<?php
+			printf(
+				/* translators: %d: number of related pages */
+				esc_html( _n( '%d related page', '%d related pages', count( $silo_page_ids ), 'v-yoast-topic-silos' ) ),
+				count( $silo_page_ids )
+			);
+			?>
+		</li>
+		<li<?php echo empty( $inbound_silo_page_ids ) ? ' class="vyts-stat-warn"' : ''; ?>>
+			<?php
+			printf(
+				/* translators: 1: count, 2: post type label */
+				esc_html( _n( '%1$d page links to this %2$s', '%1$d pages link to this %2$s', count( $inbound_silo_page_ids ), 'v-yoast-topic-silos' ) ),
+				count( $inbound_silo_page_ids ),
+				esc_html( $type_label )
+			);
+			if ( empty( $inbound_silo_page_ids ) ) {
+				echo ' ⚠️'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			}
+			?>
+		</li>
+		<li<?php echo empty( $outbound_silo_page_ids ) ? ' class="vyts-stat-warn"' : ''; ?>>
+			<?php
+			printf(
+				/* translators: 1: count, 2: post type label */
+				esc_html( _n( '%1$d outbound link to pages from this %2$s', '%1$d outbound links to pages from this %2$s', count( $outbound_silo_page_ids ), 'v-yoast-topic-silos' ) ),
+				count( $outbound_silo_page_ids ),
+				esc_html( $type_label )
+			);
+			if ( empty( $outbound_silo_page_ids ) ) {
+				echo ' ⚠️'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			}
+			?>
+		</li>
+	</ul>
 
-		<?php if ( ! empty( $other_pages_display ) ) : ?>
-			<p class="vyts-sub-heading">
-				<?php
-				printf(
-					/* translators: %d: number of other pages */
-					esc_html( _n( 'Page (%d):', 'Pages (%d):', count( $other_pages_display ), 'v-yoast-topic-silos' ) ),
-					count( $other_pages_display )
-				);
-				?>
-			</p>
-			<ul class="vyts-silo-list">
-				<?php foreach ( $other_pages_display as $other_id ) : ?>
-					<li>
-						<button type="button"
-						   class="vyts-copy-link"
-						   data-copy-url="<?php echo esc_url( get_permalink( $other_id ) ); ?>"
-						   title="<?php echo esc_attr( get_the_title( $other_id ) ); ?>">
-							<?php echo esc_html( get_the_title( $other_id ) ); ?>
-						</button>
-					</li>
-				<?php endforeach; ?>
-			</ul>
-		<?php endif; ?>
+	<?php if ( ! empty( $remaining_page_ids ) ) : ?>
+		<p class="vyts-sub-heading"><?php esc_html_e( 'Remaining Page Links:', 'v-yoast-topic-silos' ); ?></p>
+		<ul class="vyts-silo-list">
+			<?php foreach ( $remaining_page_ids as $rid ) : ?>
+				<li>
+					<button type="button"
+					        class="vyts-copy-link"
+					        data-copy-url="<?php echo esc_url( get_permalink( $rid ) ); ?>"
+					        title="<?php echo esc_attr( get_the_title( $rid ) ); ?>">
+						<?php echo esc_html( get_the_title( $rid ) ); ?>
+					</button>
+				</li>
+			<?php endforeach; ?>
+		</ul>
+	<?php endif; ?>
 
-		<?php if ( ! empty( $other_posts_display ) ) : ?>
-			<p class="vyts-sub-heading">
-				<?php
-				printf(
-					/* translators: %d: number of other posts */
-					esc_html( _n( 'Post (%d):', 'Posts (%d):', count( $other_posts_display ), 'v-yoast-topic-silos' ) ),
-					count( $other_posts_display )
-				);
-				?>
-			</p>
-			<ul class="vyts-silo-list">
-				<?php foreach ( $other_posts_display as $other_id ) : ?>
-					<li>
-						<button type="button"
-						   class="vyts-copy-link"
-						   data-copy-url="<?php echo esc_url( get_permalink( $other_id ) ); ?>"
-						   title="<?php echo esc_attr( get_the_title( $other_id ) ); ?>">
-							<?php echo esc_html( get_the_title( $other_id ) ); ?>
-						</button>
-					</li>
-				<?php endforeach; ?>
-			</ul>
-		<?php endif; ?>
+	<?php // ------------------------------------------------------------------ ?>
+	<?php // Unrelated Summary                                                   ?>
+	<?php // ------------------------------------------------------------------ ?>
+	<p class="vyts-section-heading"><?php esc_html_e( 'Unrelated Summary:', 'v-yoast-topic-silos' ); ?></p>
+	<ul class="vyts-summary-stats">
+		<li<?php echo empty( $inbound_other_ids ) ? ' class="vyts-stat-warn"' : ''; ?>>
+			<?php
+			printf(
+				/* translators: 1: count, 2: post type label */
+				esc_html( _n( '%1$d post/page links to this %2$s', '%1$d posts/pages link to this %2$s', count( $inbound_other_ids ), 'v-yoast-topic-silos' ) ),
+				count( $inbound_other_ids ),
+				esc_html( $type_label )
+			);
+			if ( empty( $inbound_other_ids ) ) {
+				echo ' ⚠️'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			}
+			?>
+		</li>
+		<li<?php echo empty( $outbound_other_ids ) ? ' class="vyts-stat-warn"' : ''; ?>>
+			<?php
+			printf(
+				/* translators: 1: count, 2: post type label */
+				esc_html( _n( '%1$d outbound link to posts/pages from this %2$s', '%1$d outbound links to posts/pages from this %2$s', count( $outbound_other_ids ), 'v-yoast-topic-silos' ) ),
+				count( $outbound_other_ids ),
+				esc_html( $type_label )
+			);
+			if ( empty( $outbound_other_ids ) ) {
+				echo ' ⚠️'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			}
+			?>
+		</li>
+	</ul>
 
+	<p class="vyts-sub-heading">
+		<?php
+		printf(
+			/* translators: %s: capitalised post type label (Post or Page) */
+			esc_html__( 'Other Links To This %s:', 'v-yoast-topic-silos' ),
+			esc_html( ucfirst( $type_label ) )
+		);
+		?>
+	</p>
+	<?php if ( ! empty( $inbound_other_display ) ) : ?>
+		<ul class="vyts-silo-list">
+			<?php foreach ( $inbound_other_display as $oid ) : ?>
+				<li>
+					<button type="button"
+					        class="vyts-copy-link"
+					        data-copy-url="<?php echo esc_url( get_permalink( $oid ) ); ?>"
+					        title="<?php echo esc_attr( get_the_title( $oid ) ); ?>">
+						<?php echo esc_html( get_the_title( $oid ) ); ?>
+					</button>
+				</li>
+			<?php endforeach; ?>
+		</ul>
+	<?php else : ?>
+		<p class="vyts-no-items"><?php esc_html_e( 'None.', 'v-yoast-topic-silos' ); ?></p>
+	<?php endif; ?>
+
+	<p class="vyts-sub-heading">
+		<?php
+		printf(
+			/* translators: %s: capitalised post type label (Post or Page) */
+			esc_html__( 'Other Links From This %s:', 'v-yoast-topic-silos' ),
+			esc_html( ucfirst( $type_label ) )
+		);
+		?>
+	</p>
+	<?php if ( ! empty( $outbound_other_display ) ) : ?>
+		<ul class="vyts-silo-list">
+			<?php foreach ( $outbound_other_display as $oid ) : ?>
+				<li>
+					<button type="button"
+					        class="vyts-copy-link"
+					        data-copy-url="<?php echo esc_url( get_permalink( $oid ) ); ?>"
+					        title="<?php echo esc_attr( get_the_title( $oid ) ); ?>">
+						<?php echo esc_html( get_the_title( $oid ) ); ?>
+					</button>
+				</li>
+			<?php endforeach; ?>
+		</ul>
+	<?php else : ?>
+		<p class="vyts-no-items"><?php esc_html_e( 'None.', 'v-yoast-topic-silos' ); ?></p>
 	<?php endif; ?>
 
 	<span class="vyts-copied-notice" style="display:none;" aria-live="polite">
@@ -430,6 +627,9 @@ function vyts_enqueue_metabox_assets( $hook_suffix ) {
 		.vyts-instructions { color: #646970; font-style: italic; margin-bottom: 6px; }
 		.vyts-section-heading { font-weight: 600; margin: 10px 0 4px; border-bottom: 1px solid #dcdcde; padding-bottom: 4px; }
 		.vyts-sub-heading { font-weight: 600; margin: 8px 0 2px; font-size: 12px; color: #50575e; }
+		.vyts-summary-stats { margin: 0 0 6px; padding: 0; list-style: none; }
+		.vyts-summary-stats li { margin: 2px 0; font-size: 12px; }
+		.vyts-stat-warn { color: #b32d2e; }
 		.vyts-category-list { margin: 0; padding: 0; list-style: none; }
 		.vyts-category-list li { margin: 4px 0; }
 		.vyts-category-list label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
