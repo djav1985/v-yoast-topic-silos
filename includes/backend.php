@@ -27,7 +27,7 @@ function vyts_register_silo_metabox() {
 	foreach ( array( 'post', 'page' ) as $post_type ) {
 		add_meta_box(
 			'vyts_silo_metabox',
-			__( 'Topic Cluster – Related Links', 'v-yoast-topic-silos' ),
+			__( 'Topic Cluster – Links', 'v-yoast-topic-silos' ),
 			'vyts_render_silo_metabox',
 			$post_type,
 			'side',
